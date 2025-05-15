@@ -4,6 +4,8 @@ from datetime import datetime
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 from reportlab.lib import colors
 import streamlit as st
+from io import BytesIO
+
 
 HISTORY_FILE = "rank_history.csv"
 
@@ -62,56 +64,42 @@ from reportlab.lib import colors
 
 
 def export_history_to_pdf(website_filter=None, limit_dates=5):
-    """Export enhanced PDF report with chart limited to recent N dates."""
-    
+    """Generate PDF and return buffer (without triggering download)."""
+
     df = load_history()
     if df.empty:
-        st.warning("No history found.")
-        return
+        return None
 
-    # Filter by website if provided
     if website_filter:
         df = df[df["website"] == website_filter]
         if df.empty:
-            st.warning(f"No history found for website: {website_filter}")
-            return
+            return None
 
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors='coerce')
     df = df.dropna(subset=["timestamp"])
     df["date"] = df["timestamp"].dt.date
 
-    # Limit to recent N dates
     recent_dates = sorted(df["date"].unique(), reverse=True)[:limit_dates]
     df = df[df["date"].isin(recent_dates)]
 
-    # Pivot to get keywords x dates
     pivot_df = df.pivot_table(index="keyword", columns="date", values="rank", aggfunc="first")
-    pivot_df = pivot_df.sort_index(axis=1)  # sort columns (dates)
+    pivot_df = pivot_df.sort_index(axis=1)
 
-
-    # Create PDF document
-    doc = SimpleDocTemplate("rank_history_report.pdf", pagesize=A4)
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
     styles = getSampleStyleSheet()
     elements = []
 
     elements.append(Paragraph("📊 Website Rank Report", styles['Title']))
     elements.append(Spacer(1, 12))
 
-    # if not pivot_df.empty and "website" in df.columns:
-    #     website = df["website"].iloc[0]
-    #     elements.append(Paragraph(f"Website: <b>{website}</b>", styles['Heading2']))
-    #     elements.append(Spacer(1, 12))
     if not pivot_df.empty and "website" in df.columns:
         website = df["website"].iloc[0]
         elements.append(Paragraph(f"Website: <b>{website}</b>", styles['Heading2']))
-
-        # Show region(s)
         if "region" in df.columns:
             regions = ", ".join(sorted(df["region"].dropna().unique()))
             elements.append(Paragraph(f"Region(s): <b>{regions}</b>", styles['Heading2']))
-        
         elements.append(Spacer(1, 12))
-
 
     elements.append(Paragraph("🔎 Keyword Rank Table", styles['Heading3']))
     keyword_data = [["Keyword"] + [str(date) for date in pivot_df.columns]]
@@ -128,4 +116,5 @@ def export_history_to_pdf(website_filter=None, limit_dates=5):
     elements.append(keyword_table)
 
     doc.build(elements)
-    st.success(f"✅ PDF exported with the last 5 dates as `rank_history_report.pdf`")
+    buffer.seek(0)
+    return buffer
